@@ -1,0 +1,95 @@
+﻿@using SuperTikTakToe.Services
+@rendermode InteractiveServer
+@inject StorageCrossUsersService GameInfo
+
+<div class="tic-tac-toe-sub">
+  @{
+    if (!GameInfo.FinishedBoards[BoardNumber])
+    {
+      for (var i = 0; i < 9; i++)
+        {
+          var index = i;
+          <div class="cell-sub" style="background-color: @GameInfo.SubGameColor[BoardNumber, i]" @onclick="() => UpdateColor(index)"></div>
+        }
+    }
+  }
+</div>
+
+<style>
+  .tic-tac-toe-sub {
+    display: grid;
+    grid-template-columns: repeat(3, 20px);
+    grid-template-rows: repeat(3, 20px);
+    gap: 2px;
+  }
+  
+  .cell-sub {
+    width: 25px;
+    height: 25px;
+    border: 2px solid black;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 2em;
+  }
+</style>
+
+@code {
+  [Parameter] public EventCallback<int> PlayerTurn { get; set; }
+  [Parameter] public int BoardNumber { get; set; }
+  [Parameter] public EventCallback<Tuple<int,string>> PlayerWonCallBack { get; set; }
+  [Parameter] public EventCallback<int> SubGameBoardOccupied { get; set; }
+
+  private async Task UpdateColor(int index)
+  {
+    if (GameInfo.SubGameColor[BoardNumber, index] != "white") return;
+    
+    if (GameInfo.ActiveBoard != BoardNumber && GameInfo.ActiveBoard is not null) return;
+
+    var playerColor = GameInfo.GetCurrentPlayerColor();
+    
+    GameInfo.SubGameColor[BoardNumber, index] = playerColor;
+    
+    var hasWon = await CheckForWinner(playerColor);
+
+    if (IsAllFieldsAreOccupied() && !hasWon) await SubGameBoardOccupied.InvokeAsync(BoardNumber);
+    await PlayerTurn.InvokeAsync(index);
+  }
+
+  private async Task<bool> CheckForWinner(string playerColor)
+  {
+    var winningCombinations = new int[][]
+    {
+      new int[] { 0, 1, 2 }, // Top row
+      new int[] { 3, 4, 5 }, // Middle row
+      new int[] { 6, 7, 8 }, // Bottom row
+      new int[] { 0, 3, 6 }, // Left column
+      new int[] { 1, 4, 7 }, // Middle column
+      new int[] { 2, 5, 8 }, // Right column
+      new int[] { 0, 4, 8 }, // Left-to-right diagonal
+      new int[] { 2, 4, 6 }  // Right-to-left diagonal
+    };
+    
+    if (winningCombinations.Any(combination => GameInfo.SubGameColor[BoardNumber, combination[0]] == playerColor && GameInfo.SubGameColor[BoardNumber,combination[1]] == playerColor && GameInfo.SubGameColor[BoardNumber,combination[2]] == playerColor))
+    {
+      GameInfo.FinishedBoards[BoardNumber] = true;
+      await PlayerWonCallBack.InvokeAsync(new Tuple<int, string>(BoardNumber, playerColor));
+      return true;
+    }
+
+    return false;
+  }
+
+  private bool IsAllFieldsAreOccupied()
+  {
+    for (var i = 0; i < 9; i++)
+    {
+      if (GameInfo.SubGameColor[BoardNumber, i] == "white")
+      {
+        return false;
+      }
+    }
+
+    return true;
+  }
+}

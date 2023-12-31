@@ -1,0 +1,154 @@
+﻿@rendermode InteractiveServer
+@using Microsoft.AspNetCore.SignalR.Client
+@using SuperTikTakToe.Services
+@inject NavigationManager Navigation
+@inject StorageCrossUsersService GameInfo
+@implements IAsyncDisposable
+
+<div>Player @GameInfo.GetCurrentPlayerColor() turn</div>
+<div class="tic-tac-toe">
+  @{
+    for (var i = 0; i < 9; i++)
+    {
+      <div class="cell" style="background-color: @GameInfo.MainGameColor[i]">
+        <SubGameBoard BoardNumber=i PlayerTurn="UpdateColor" PlayerWonCallBack="PlayerWonBoard" SubGameBoardOccupied="AllFieldsOccupiedOnSubGameBoard"></SubGameBoard>
+      </div>
+    }
+  }
+</div>
+<div>
+  @{
+    if (!IsConnected)
+    {
+      <div>Not Connected</div>
+    }
+    if (GameInfo.GameFinished)
+    {
+      <div>@GameInfo.WinnerColor won</div>
+    }
+  }
+</div>
+
+<style>
+    .tic-tac-toe {
+      display: grid;
+      grid-template-columns: repeat(3, 100px);
+      grid-template-rows: repeat(3, 100px);
+      gap: 10px;
+    }
+    
+    .cell {
+      width: 100px;
+      height: 100px;
+      border: 2px solid black;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      font-size: 2em;
+    }
+</style>
+
+@code {
+  private HubConnection? _hubConnection;
+  
+  protected override async Task OnInitializedAsync()
+  {
+    _hubConnection = new HubConnectionBuilder()
+      .WithUrl(Navigation.ToAbsoluteUri("/gamehub"))
+      .Build();
+
+    _hubConnection.On("NextTurn", () =>
+    {
+      InvokeAsync(StateHasChanged);
+    });
+
+    await _hubConnection.StartAsync();
+  }
+
+  private async Task EndTurn()
+  {
+    await _hubConnection.SendAsync("EndTurn");
+    await InvokeAsync(StateHasChanged);
+  }
+  
+  private async Task UpdateColor(int index)
+  {
+    if (GameInfo.GameFinished) return;
+    
+    GameInfo.IsPlayerRed = !GameInfo.IsPlayerRed;
+    if (GameInfo.FinishedBoards[index])
+    {
+      if (GameInfo.ActiveBoard is not null)
+      {
+        if (GameInfo.MainGameColor[(int)GameInfo.ActiveBoard] == "green") GameInfo.MainGameColor[(int)GameInfo.ActiveBoard] = "white";
+      }
+      
+      GameInfo.ActiveBoard = null;
+      
+      await EndTurn();
+      return;
+    }
+
+    if (GameInfo.ActiveBoard == null)
+    {
+      GameInfo.ActiveBoard = index;
+      GameInfo.MainGameColor[index] = "green";
+    }
+    else
+    {
+      if(!GameInfo.FinishedBoards[(int)GameInfo.ActiveBoard]) GameInfo.MainGameColor[(int)GameInfo.ActiveBoard] = "white";
+      GameInfo.ActiveBoard = index;
+      GameInfo.MainGameColor[index] = "green";
+    }
+
+    await EndTurn();
+  }
+
+  private async Task PlayerWonBoard(Tuple<int, string> playerAndBoardNumber)
+  {
+    GameInfo.FinishedBoards[playerAndBoardNumber.Item1] = true;
+    GameInfo.MainGameColor[playerAndBoardNumber.Item1] = playerAndBoardNumber.Item2;
+    
+    await CheckForWinner(playerAndBoardNumber.Item2);
+    await InvokeAsync(StateHasChanged);
+  }
+  
+  private async Task CheckForWinner(string playerColor)
+  {
+    var winningCombinations = new int[][]
+    {
+      new int[] { 0, 1, 2 }, // Top row
+      new int[] { 3, 4, 5 }, // Middle row
+      new int[] { 6, 7, 8 }, // Bottom row
+      new int[] { 0, 3, 6 }, // Left column
+      new int[] { 1, 4, 7 }, // Middle column
+      new int[] { 2, 5, 8 }, // Right column
+      new int[] { 0, 4, 8 }, // Left-to-right diagonal
+      new int[] { 2, 4, 6 }  // Right-to-left diagonal
+    };
+    
+    if (winningCombinations.Any(combination => GameInfo.MainGameColor[combination[0]] == playerColor && GameInfo.MainGameColor[combination[1]] == playerColor && GameInfo.MainGameColor[combination[2]] == playerColor))
+    {
+      GameInfo.GameFinished = true;
+      GameInfo.WinnerColor = playerColor;
+      await EndTurn();
+    }
+  }
+
+  private void AllFieldsOccupiedOnSubGameBoard(int boardNumber)
+  {
+    GameInfo.MainGameColor[boardNumber] = "grey";
+    GameInfo.FinishedBoards[boardNumber] = true;
+  }
+  
+  private bool IsConnected =>
+    _hubConnection?.State == HubConnectionState.Connected;
+
+  public async ValueTask DisposeAsync()
+  {
+    if (_hubConnection is not null)
+    {
+      await _hubConnection.DisposeAsync();
+    }
+  }
+}
